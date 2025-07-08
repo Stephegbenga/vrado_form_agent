@@ -1,0 +1,6 @@
+flask
+pymongo
+openai
+python-dotenv
+flask-cors
+werkzeug

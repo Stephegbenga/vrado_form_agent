@@ -1,0 +1,275 @@
+<!-- index.html -->
+<!-- A simple frontend to interact with the chatbot backend. -->
+<!-- Save this file in the same directory as app.py -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Registration Assistant</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700&display=swap" rel="stylesheet">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        #chat-box {
+            height: 70vh;
+            overflow-y: auto;
+            scroll-behavior: smooth;
+        }
+        .user-msg { display: flex; justify-content: flex-end; }
+        .bot-msg { display: flex; justify-content: flex-start; }
+        .msg-bubble {
+            max-width: 75%;
+            padding: 10px 15px;
+            border-radius: 15px;
+            line-height: 1.5;
+        }
+        .user-msg .msg-bubble { background-color: #2563eb; color: white; border-bottom-right-radius: 0; }
+        .bot-msg .msg-bubble { background-color: #e5e7eb; color: #1f2937; border-bottom-left-radius: 0; }
+        #file-upload-section {
+            display: none; /* Hidden by default */
+            border-top: 1px solid #e5e7eb;
+            padding-top: 1rem;
+        }
+    </style>
+</head>
+<body class="bg-gray-100 flex items-center justify-center h-screen">
+
+    <div class="w-full max-w-2xl bg-white rounded-lg shadow-xl flex flex-col h-[90vh]">
+        <div class="p-4 border-b border-gray-200">
+            <h1 class="text-2xl font-bold text-gray-800">Registration Assistant</h1>
+            <p class="text-sm text-gray-500">Agent ID: <span id="agent-id">{{ agent_id }}</span></p>
+        </div>
+        
+        <div id="chat-box" class="p-4 flex-grow space-y-4">
+            <!-- Messages will be appended here -->
+        </div>
+
+        <div id="file-upload-section" class="p-4">
+            <label id="file-upload-label" for="file-input" class="block mb-2 text-sm font-medium text-gray-900">Upload your file:</label>
+            <input type="file" id="file-input" class="block w-full text-sm text-gray-900 bg-gray-50 rounded-lg border border-gray-300 cursor-pointer focus:outline-none">
+            <button id="upload-button" class="mt-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:bg-gray-400">Upload File</button>
+            <p id="upload-status" class="text-sm mt-2"></p>
+        </div>
+
+        <div class="p-4 border-t border-gray-200">
+            <div class="flex">
+                <input type="text" id="message-input" class="w-full px-4 py-2 border rounded-l-lg focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="Type your message...">
+                <button id="send-button" class="px-4 py-2 bg-blue-600 text-white rounded-r-lg hover:bg-blue-700 disabled:bg-gray-400">Send</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const agentId = document.getElementById('agent-id').textContent;
+        let sessionId = localStorage.getItem(`session_id_${agentId}`);
+        if (!sessionId) {
+            sessionId = 'sid-' + crypto.randomUUID();
+            localStorage.setItem(`session_id_${agentId}`, sessionId);
+        }
+
+        const chatBox = document.getElementById('chat-box');
+        const messageInput = document.getElementById('message-input');
+        const sendButton = document.getElementById('send-button');
+        
+        const fileUploadSection = document.getElementById('file-upload-section');
+        const fileUploadLabel = document.getElementById('file-upload-label');
+        const fileInput = document.getElementById('file-input');
+        const uploadButton = document.getElementById('upload-button');
+        const uploadStatus = document.getElementById('upload-status');
+        let currentFileType = null;
+
+        function addMessage(sender, text) {
+            const messageWrapper = document.createElement('div');
+            messageWrapper.className = `flex ${sender === 'user' ? 'user-msg' : 'bot-msg'}`;
+            
+            const messageBubble = document.createElement('div');
+            messageBubble.className = 'msg-bubble';
+            messageBubble.textContent = text;
+            
+            messageWrapper.appendChild(messageBubble);
+            chatBox.appendChild(messageWrapper);
+            chatBox.scrollTop = chatBox.scrollHeight;
+        }
+
+        function toggleLoading(isLoading) {
+            sendButton.disabled = isLoading;
+            messageInput.disabled = isLoading;
+            uploadButton.disabled = isLoading;
+            sendButton.innerHTML = isLoading ? `<svg class="animate-spin h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>` : 'Send';
+        }
+        
+        function checkForUploadRequest(message) {
+            const lowerCaseMessage = message.toLowerCase();
+            let fileTypeDetected = null;
+
+            // FIX: Reordered the checks to be more specific.
+            // Check for the most specific term ("signature") first to avoid
+            // being incorrectly matched by a less specific term ("passport")
+            // in the same sentence.
+            if (lowerCaseMessage.includes('signature')) {
+                fileTypeDetected = 'signature';
+                fileUploadLabel.textContent = 'Please upload a picture of your signature:';
+            } else if (lowerCaseMessage.includes('passport')) {
+                fileTypeDetected = 'passport';
+                fileUploadLabel.textContent = 'Please upload a clear copy of your passport photograph:';
+            } else if (lowerCaseMessage.includes('nin')) {
+                fileTypeDetected = 'nin';
+                fileUploadLabel.textContent = 'Please upload a clear picture of your NIN:';
+            }
+            
+            if(fileTypeDetected) {
+                currentFileType = fileTypeDetected;
+                fileUploadSection.style.display = 'block';
+            } else {
+                fileUploadSection.style.display = 'none';
+            }
+        }
+
+        async function sendMessage() {
+            const messageText = messageInput.value.trim();
+            if (!messageText) return;
+
+            addMessage('user', messageText);
+            messageInput.value = '';
+            toggleLoading(true);
+
+            try {
+                const response = await fetch(`/api/chat/${agentId}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ message: messageText, session_id: sessionId })
+                });
+
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+
+                const data = await response.json();
+                addMessage('bot', data.reply);
+                checkForUploadRequest(data.reply);
+
+            } catch (error) {
+                console.error('Error sending message:', error);
+                addMessage('bot', 'Sorry, something went wrong. Please try again.');
+            } finally {
+                toggleLoading(false);
+            }
+        }
+        
+        async function uploadFile() {
+            if (!fileInput.files[0] || !currentFileType) {
+                uploadStatus.textContent = 'Please select a file first.';
+                uploadStatus.style.color = 'red';
+                return;
+            }
+            
+            const formData = new FormData();
+            formData.append('file', fileInput.files[0]);
+            formData.append('session_id', sessionId);
+            formData.append('file_type', currentFileType);
+            
+            uploadStatus.textContent = 'Uploading...';
+            uploadStatus.style.color = 'black';
+            toggleLoading(true);
+
+            try {
+                const response = await fetch(`/api/upload/${agentId}`, {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                const result = await response.json();
+
+                if (!response.ok) {
+                    throw new Error(result.error || 'Upload failed');
+                }
+                
+                uploadStatus.textContent = 'Upload successful!';
+                uploadStatus.style.color = 'green';
+                fileInput.value = ''; // Reset file input
+                
+                // Trigger the next step from the bot
+                await sendMessageAfterUpload();
+
+            } catch (error) {
+                console.error('Error uploading file:', error);
+                uploadStatus.textContent = `Upload failed: ${error.message}`;
+                uploadStatus.style.color = 'red';
+            } finally {
+                toggleLoading(false);
+            }
+        }
+        
+        // This function sends a generic message to trigger the bot's next step after an upload
+        async function sendMessageAfterUpload() {
+            // Use a more neutral message to avoid confusion
+            const messageText = `File uploaded. What is the next step?`;
+            
+            // We don't need to add the user message to the chat here, 
+            // as it's just a trigger for the bot. The bot's response is what matters.
+            toggleLoading(true);
+
+            try {
+                const response = await fetch(`/api/chat/${agentId}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ message: messageText, session_id: sessionId })
+                });
+
+                if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+
+                const data = await response.json();
+                addMessage('bot', data.reply);
+                checkForUploadRequest(data.reply);
+
+            } catch (error) {
+                console.error('Error sending message:', error);
+                addMessage('bot', 'Sorry, something went wrong. Please try again.');
+            } finally {
+                toggleLoading(false);
+            }
+        }
+
+        // Function to correctly start the conversation
+        async function startChat() {
+            toggleLoading(true);
+            // This message is a trigger for the backend to send the first question
+            const startMessage = "Hello, I am ready to begin the registration process.";
+            try {
+                const response = await fetch(`/api/chat/${agentId}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ message: startMessage, session_id: sessionId })
+                });
+                if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+                const data = await response.json();
+                addMessage('bot', data.reply);
+                checkForUploadRequest(data.reply);
+            } catch (error) {
+                console.error('Error starting chat:', error);
+                addMessage('bot', 'Sorry, something went wrong. Please refresh the page to start.');
+            } finally {
+                toggleLoading(false);
+            }
+        }
+
+        sendButton.addEventListener('click', sendMessage);
+        messageInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                sendMessage();
+            }
+        });
+        uploadButton.addEventListener('click', uploadFile);
+
+        // Initial greeting from the bot
+        window.onload = () => {
+             startChat();
+        };
+
+    </script>
+</body>
+</html>
