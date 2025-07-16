@@ -1,127 +1,142 @@
-# Google Form Filler with browser-use and OpenAI
-# This script uses the browser-use library to automate filling a Google Form.
-# It leverages an AI agent to understand a high-level task and execute it.
-
-# -----------------
-# --- LIBRARIES ---
-# -----------------
-
-# You'll need to install a few libraries for this to work.
-# It's recommended to use a virtual environment.
-#
-# pip install browser-use langchain-openai python-dotenv
-#
-# After installing, you also need to install the browser playwright needs:
-# playwright install chromium
+# app.py
+# Main Flask application file for a specialized Nigerian Business Registration AI Assistant.
 
 import os
-import asyncio
-from dotenv import load_dotenv
-from browser_use import Agent, Browser, BrowserConfig # Import Browser and BrowserConfig
-from browser_use.llm import ChatOpenAI
+import uuid
+import json
+from datetime import datetime
+from functools import wraps
 
-# -----------------
-# --- SETUP ---
-# -----------------
+import openai
+from bson.objectid import ObjectId
+from flask import Flask, jsonify, request, render_template_string, url_for, send_from_directory
+from flask_cors import CORS
+from pymongo import MongoClient
+from werkzeug.utils import secure_filename
 
-# Load environment variables from a .env file
-load_dotenv()
+# --- Configuration ---
+MONGO_URI = os.getenv("MONGO_URI")
+DB_NAME = "chatbot_db"
+# IMPORTANT: Add your OpenAI API Key here
+OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "YOUR_OPENAI_API_KEY")
 
-# Check if the OpenAI API key is set
-if not os.getenv("OPENAI_API_KEY"):
-    print("Error: OPENAI_API_KEY environment variable not set.")
-    print("Please create a .env file and add your key, or set the environment variable directly.")
-    exit()
+# --- Flask App Initialization ---
+app = Flask(__name__)
+CORS(app)
 
-# -------------------
-# --- MAIN SCRIPT ---
-# -------------------
+# --- Database Connection (for logging conversations) ---
+try:
+    client = MongoClient(MONGO_URI)
+    client.admin.command('ping')
+    db = client[DB_NAME]
+    messages_collection = db.messages
+    print("MongoDB connection successful.")
+except Exception as e:
+    print(f"Error connecting to MongoDB: {e}")
+    db = None 
 
-async def fill_form_with_agent(form_url, form_data):
+# --- OpenAI API Client ---
+if OPENAI_API_KEY and OPENAI_API_KEY != "YOUR_OPENAI_API_KEY":
+    openai.api_key = OPENAI_API_KEY
+else:
+    print("WARNING: OpenAI API Key is not set. The chatbot will not function.")
+    openai = None
+
+# --- Helper Functions ---
+
+def get_openai_response(conversation_history):
     """
-    Uses a browser-use agent to fill out a Google Form with specific data.
-
-    Args:
-        form_url (str): The URL of the Google Form.
-        form_data (dict): A dictionary where keys are the visible question labels
-                          and values are the exact answers to be entered.
+    Constructs a prompt and gets a response from the OpenAI API.
     """
-    print("Constructing the task for the AI agent...")
+    if not openai:
+        return "I'm sorry, my connection to the AI service is not configured. Please contact support."
 
-    # Construct a detailed, single-string task for the agent.
-    # This task tells the agent where to go and what exact text to enter for each question.
-    task_description = f"First, go to the following URL: {form_url}. "
-    task_description += "Then, carefully fill out the form with the exact information provided: "
+    # NEW PERSONA: This is the core prompt that defines the bot's new role.
+    system_prompt = """
+    You are a highly knowledgeable and professional AI assistant specializing in Nigerian business registration and corporate affairs. 
+    Your name is 'CAC Connect'. Your expertise covers all aspects of setting up and managing a company in Nigeria, with a deep understanding of the Corporate Affairs Commission (CAC) processes.
 
-    for question, answer in form_data.items():
-        task_description += f"For the question labeled '{question}', enter the exact text: '{answer}'. "
-
-    task_description += "After filling out all the fields accurately, find and click the 'Submit' button to submit the form."
-
-    print("\n--- Agent Task ---")
-    print(task_description)
-    print("--------------------\n")
+    Your primary functions are:
+    1.  **Answer Questions:** Provide clear, accurate, and up-to-date information about business registration types (Business Name, Limited Company, etc.), requirements, costs, timelines, and post-registration compliance.
+    2.  **Guide Users:** Help users understand the steps involved in the CAC registration process. Explain complex legal and corporate terms in simple language.
+    3.  **Provide Advice:** Offer general advice on choosing the right business structure and other related matters.
+    
+    Always be polite, professional, and encouraging. Start the first conversation by introducing yourself as 'CAC Connect' and asking how you can help with their business registration needs in Nigeria today.
+    """
+    
+    messages = [{"role": "system", "content": system_prompt}]
+    messages.extend(conversation_history)
 
     try:
-        # Initialize the LLM that will power the agent.
-        # A powerful model like "gpt-4o" is recommended for understanding complex tasks.
-        llm = ChatOpenAI(model="gpt-4o")
-
-        # --- FIX FOR SANDBOX ISSUE (Alternative Method) ---
-        # Configure the browser to run without a sandbox using the specific 'chromium_sandbox' flag.
-        browser = Browser(
-            config=BrowserConfig(
-                chromium_sandbox=False
-            )
+        response = openai.chat.completions.create(
+            model="gpt-4o",
+            messages=messages
         )
-
-        # Create the agent with the specified task, LLM, and custom browser configuration
-        agent = Agent(task=task_description, llm=llm, browser=browser)
-
-        # Run the agent and wait for it to complete the task
-        print("Agent is starting... It will now open a browser and perform the task.")
-        result = await agent.run()
-
-        print("\n--- Agent Result ---")
-        print(result)
-        print("--------------------\n")
-        print("Task completed successfully!")
-
+        return response.choices[0].message.content
     except Exception as e:
-        print(f"An error occurred while running the agent: {e}")
+        print(f"Error calling OpenAI API: {e}")
+        return "I'm sorry, I'm having trouble connecting to my brain right now. Please try again in a moment."
 
-# -----------------
-# --- EXECUTION ---
-# -----------------
+# --- Decorators ---
+def db_connection_required(f):
+    """Decorator to check for a valid DB connection."""
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        if db is None:
+            return jsonify({"error": "Database connection is not available."}), 503
+        return f(*args, **kwargs)
+    return decorated_function
 
-if __name__ == "__main__":
-    # --- USER INPUT ---
-    # Replace with your Google Form URL
-    google_form_url = "https://docs.google.com/forms/d/e/1FAIpQLSeIMJVgS4za5CPuW8JlJMreenM6XMez3dkIsFuVWCkjKLn4ow/viewform"
+# --- API Endpoints ---
 
-    # Define the data to be filled into the form.
-    # The keys should be the exact visible text label of the question on the form.
-    # The values are the exact answers to be entered.
-    form_data_to_fill = {
-        "Role": "business owner",
-        "First Name": "steve",
-        "Middle Name": "Ola",
-        "Surname": "James",
-        "Date of Birth": "07/07/2002", # Assuming MM/DD/YYYY or similar format
-        "Phone Number": "7867898789",
-        "Email Address": "test@gg.com",
-        "Gender": "Male",
-        "Residential Address": "A31, orisun",
-        "City": "ilesa",
-        "Local Government": "ilesa west",
-        "State": "osun",
-        "Identification Number": "1234",
-        "Number of Shares": "33"
-    }
+@app.route("/")
+def index():
+    return "<h1>Nigerian Business Registration Chatbot Backend</h1>"
+
+@app.route("/api/chat/<agent_id>", methods=['POST'])
+@db_connection_required
+def chat(agent_id):
+    """Main endpoint for handling chat interactions."""
+    data = request.json
+    user_message = data.get("message")
+    session_id = data.get("session_id")
+
+    if not user_message or not session_id:
+        return jsonify({"error": "Missing message or session_id"}), 400
+
+    timestamp = datetime.utcnow()
+
+    # 1. Save user's message to the log
+    messages_collection.insert_one({
+        "agent_id": agent_id,
+        "session_id": session_id,
+        "sender": "user",
+        "message_text": user_message,
+        "timestamp": timestamp
+    })
+
+    # 2. Get conversation history for context
+    history_cursor = messages_collection.find({"session_id": session_id}).sort("timestamp", -1).limit(10)
+    conversation_history = [
+        {"role": "user" if msg["sender"] == "user" else "assistant", "content": msg["message_text"]}
+        for msg in reversed(list(history_cursor))
+    ]
+
+    # 3. Get the bot's response from OpenAI
+    bot_response_text = get_openai_response(conversation_history)
+
+    # 4. Save bot's response to the log
+    messages_collection.insert_one({
+        "agent_id": agent_id,
+        "session_id": session_id,
+        "sender": "bot",
+        "message_text": bot_response_text,
+        "timestamp": datetime.utcnow()
+    })
+    
+    return jsonify({"reply": bot_response_text})
 
 
-    if google_form_url == "YOUR_GOOGLE_FORM_URL":
-        print("Please replace 'YOUR_GOOGLE_FORM_URL' with the actual URL of your Google Form in the script.")
-    else:
-        # Run the asynchronous function
-        asyncio.run(fill_form_with_agent(google_form_url, form_data_to_fill))
+if __name__ == '__main__':
+    # Note: debug=True is not for production use.
+    app.run(host='0.0.0.0', port=5000, debug=True)

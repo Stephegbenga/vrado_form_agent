@@ -1,275 +1,261 @@
-<!-- index.html -->
-<!-- A simple frontend to interact with the chatbot backend. -->
-<!-- Save this file in the same directory as app.py -->
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Registration Assistant</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700&display=swap" rel="stylesheet">
-    <script src="https://cdn.tailwindcss.com"></script>
-    <style>
-        body { font-family: 'Inter', sans-serif; }
-        #chat-box {
-            height: 70vh;
-            overflow-y: auto;
-            scroll-behavior: smooth;
-        }
-        .user-msg { display: flex; justify-content: flex-end; }
-        .bot-msg { display: flex; justify-content: flex-start; }
-        .msg-bubble {
-            max-width: 75%;
-            padding: 10px 15px;
-            border-radius: 15px;
-            line-height: 1.5;
-        }
-        .user-msg .msg-bubble { background-color: #2563eb; color: white; border-bottom-right-radius: 0; }
-        .bot-msg .msg-bubble { background-color: #e5e7eb; color: #1f2937; border-bottom-left-radius: 0; }
-        #file-upload-section {
-            display: none; /* Hidden by default */
-            border-top: 1px solid #e5e7eb;
-            padding-top: 1rem;
-        }
-    </style>
-</head>
-<body class="bg-gray-100 flex items-center justify-center h-screen">
+<!--
+  Embeddable Chat Widget
+  ----------------------
+  To use this on any website, simply copy and paste this entire code block
+  right before the closing </body> tag of your HTML file.
+-->
+<div id="chat-widget-container"></div>
 
-    <div class="w-full max-w-2xl bg-white rounded-lg shadow-xl flex flex-col h-[90vh]">
-        <div class="p-4 border-b border-gray-200">
-            <h1 class="text-2xl font-bold text-gray-800">Registration Assistant</h1>
-            <p class="text-sm text-gray-500">Agent ID: <span id="agent-id">{{ agent_id }}</span></p>
+<script>
+  (function() {
+    // --- Configuration ---
+    // IMPORTANT: Change this URL to the location of your running Flask backend.
+    const BACKEND_URL = 'http://127.0.0.1:5000'; 
+    // The agent_id for this widget. You can have different widgets for different agents.
+    const AGENT_ID = 'WEB_ASSISTANT_01';
+
+    // --- Create Widget Structure ---
+    const container = document.getElementById('chat-widget-container');
+    container.innerHTML = `
+      <style>
+        #chat-widget-container {
+          position: fixed;
+          bottom: 20px;
+          right: 20px;
+          z-index: 9999;
+          font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+        }
+        #chat-bubble {
+          width: 60px;
+          height: 60px;
+          background-color: #2563eb;
+          border-radius: 50%;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          cursor: pointer;
+          box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+          transition: transform 0.2s ease;
+        }
+        #chat-bubble:hover {
+          transform: scale(1.1);
+        }
+        #chat-bubble svg {
+          width: 32px;
+          height: 32px;
+          color: white;
+        }
+        #chat-popup {
+          display: none;
+          position: absolute;
+          bottom: 80px;
+          right: 0;
+          width: 350px;
+          height: 500px;
+          background-color: white;
+          border-radius: 15px;
+          box-shadow: 0 5px 20px rgba(0,0,0,0.2);
+          display: flex;
+          flex-direction: column;
+          overflow: hidden;
+          opacity: 0;
+          transform: translateY(20px);
+          transition: opacity 0.3s ease, transform 0.3s ease;
+        }
+        #chat-popup.active {
+          display: flex;
+          opacity: 1;
+          transform: translateY(0);
+        }
+        .chat-header {
+          background-color: #2563eb;
+          color: white;
+          padding: 15px;
+          font-weight: bold;
+          text-align: center;
+        }
+        .chat-messages {
+          flex-grow: 1;
+          padding: 15px;
+          overflow-y: auto;
+          scroll-behavior: smooth;
+          display: flex;
+          flex-direction: column;
+          gap: 10px;
+        }
+        .message {
+          max-width: 80%;
+          padding: 10px 15px;
+          border-radius: 18px;
+          line-height: 1.4;
+        }
+        .message.user {
+          background-color: #f0f0f0;
+          color: #333;
+          align-self: flex-end;
+          border-bottom-right-radius: 4px;
+        }
+        .message.bot {
+          background-color: #2563eb;
+          color: white;
+          align-self: flex-start;
+          border-bottom-left-radius: 4px;
+        }
+        .chat-input {
+          display: flex;
+          border-top: 1px solid #e5e7eb;
+          padding: 10px;
+        }
+        .chat-input input {
+          flex-grow: 1;
+          border: 1px solid #ccc;
+          border-radius: 20px;
+          padding: 10px 15px;
+          outline: none;
+          transition: border-color 0.2s;
+        }
+        .chat-input input:focus {
+          border-color: #2563eb;
+        }
+        .chat-input button {
+          background: none;
+          border: none;
+          cursor: pointer;
+          padding: 0 10px;
+          color: #2563eb;
+        }
+        .chat-input button svg {
+          width: 24px;
+          height: 24px;
+        }
+        .message.loading {
+            align-self: flex-start;
+        }
+        .loading span {
+            display: inline-block;
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background-color: #9ca3af;
+            animation: bounce 1s infinite;
+        }
+        .loading span:nth-child(2) { animation-delay: 0.1s; }
+        .loading span:nth-child(3) { animation-delay: 0.2s; }
+        @keyframes bounce {
+            0%, 60%, 100% { transform: translateY(0); }
+            30% { transform: translateY(-5px); }
+        }
+      </style>
+
+      <div id="chat-popup">
+        <div class="chat-header">AI Assistant</div>
+        <div class="chat-messages"></div>
+        <div class="chat-input">
+          <input type="text" placeholder="Type a message...">
+          <button>
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"><path d="M3.478 2.405a.75.75 0 00-.926.94l2.432 7.905H13.5a.75.75 0 010 1.5H4.984l-2.432 7.905a.75.75 0 00.926.94 60.519 60.519 0 0018.445-8.986.75.75 0 000-1.218A60.517 60.517 0 003.478 2.405z" /></svg>
+          </button>
         </div>
-        
-        <div id="chat-box" class="p-4 flex-grow space-y-4">
-            <!-- Messages will be appended here -->
-        </div>
+      </div>
 
-        <div id="file-upload-section" class="p-4">
-            <label id="file-upload-label" for="file-input" class="block mb-2 text-sm font-medium text-gray-900">Upload your file:</label>
-            <input type="file" id="file-input" class="block w-full text-sm text-gray-900 bg-gray-50 rounded-lg border border-gray-300 cursor-pointer focus:outline-none">
-            <button id="upload-button" class="mt-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:bg-gray-400">Upload File</button>
-            <p id="upload-status" class="text-sm mt-2"></p>
-        </div>
+      <div id="chat-bubble">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"><path fill-rule="evenodd" d="M4.848 2.771A49.144 49.144 0 0112 2.25c2.43 0 4.817.178 7.152.52 1.978.292 3.348 2.024 3.348 3.97v6.02c0 1.946-1.37 3.678-3.348 3.97a48.901 48.901 0 01-3.476.383.39.39 0 00-.297.17l-2.755 4.133a.75.75 0 01-1.248 0l-2.755-4.133a.39.39 0 00-.297-.17 48.9 48.9 0 01-3.476-.384c-1.978-.29-3.348-2.024-3.348-3.97V6.741c0-1.946 1.37-3.68 3.348-3.97zM6.75 8.25a.75.75 0 01.75-.75h9a.75.75 0 010 1.5h-9a.75.75 0 01-.75-.75zm.75 2.25a.75.75 0 000 1.5H12a.75.75 0 000-1.5H7.5z" clip-rule="evenodd" /></svg>
+      </div>
+    `;
 
-        <div class="p-4 border-t border-gray-200">
-            <div class="flex">
-                <input type="text" id="message-input" class="w-full px-4 py-2 border rounded-l-lg focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="Type your message...">
-                <button id="send-button" class="px-4 py-2 bg-blue-600 text-white rounded-r-lg hover:bg-blue-700 disabled:bg-gray-400">Send</button>
-            </div>
-        </div>
-    </div>
-
-    <script>
-        const agentId = document.getElementById('agent-id').textContent;
-        let sessionId = localStorage.getItem(`session_id_${agentId}`);
-        if (!sessionId) {
-            sessionId = 'sid-' + crypto.randomUUID();
-            localStorage.setItem(`session_id_${agentId}`, sessionId);
+    // --- Widget Logic ---
+    const chatBubble = document.getElementById('chat-bubble');
+    const chatPopup = document.getElementById('chat-popup');
+    const chatMessages = chatPopup.querySelector('.chat-messages');
+    const chatInput = chatPopup.querySelector('.chat-input input');
+    const sendButton = chatPopup.querySelector('.chat-input button');
+    
+    let sessionId = localStorage.getItem(`chat_widget_session_${AGENT_ID}`);
+    if (!sessionId) {
+        sessionId = 'wid-' + crypto.randomUUID();
+        localStorage.setItem(`chat_widget_session_${AGENT_ID}`, sessionId);
+    }
+    
+    chatBubble.addEventListener('click', () => {
+        chatPopup.classList.toggle('active');
+        if (chatPopup.classList.contains('active') && chatMessages.children.length === 0) {
+            startChat();
         }
+    });
 
-        const chatBox = document.getElementById('chat-box');
-        const messageInput = document.getElementById('message-input');
-        const sendButton = document.getElementById('send-button');
-        
-        const fileUploadSection = document.getElementById('file-upload-section');
-        const fileUploadLabel = document.getElementById('file-upload-label');
-        const fileInput = document.getElementById('file-input');
-        const uploadButton = document.getElementById('upload-button');
-        const uploadStatus = document.getElementById('upload-status');
-        let currentFileType = null;
+    const addMessage = (sender, text) => {
+        // Remove loading indicator if it exists
+        const loading = chatMessages.querySelector('.loading');
+        if (loading) loading.remove();
 
-        function addMessage(sender, text) {
-            const messageWrapper = document.createElement('div');
-            messageWrapper.className = `flex ${sender === 'user' ? 'user-msg' : 'bot-msg'}`;
+        const messageElem = document.createElement('div');
+        messageElem.className = `message ${sender}`;
+        messageElem.textContent = text;
+        chatMessages.appendChild(messageElem);
+        chatMessages.scrollTop = chatMessages.scrollHeight;
+    };
+
+    const showLoading = () => {
+        const loadingElem = document.createElement('div');
+        loadingElem.className = 'message bot loading';
+        loadingElem.innerHTML = '<span></span><span></span><span></span>';
+        chatMessages.appendChild(loadingElem);
+        chatMessages.scrollTop = chatMessages.scrollHeight;
+    };
+
+    const sendMessage = async () => {
+        const messageText = chatInput.value.trim();
+        if (!messageText) return;
+
+        addMessage('user', messageText);
+        chatInput.value = '';
+        chatInput.disabled = true;
+        sendButton.disabled = true;
+        showLoading();
+
+        try {
+            const response = await fetch(`${BACKEND_URL}/api/chat/${AGENT_ID}`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ message: messageText, session_id: sessionId })
+            });
+
+            if (!response.ok) throw new Error(`HTTP error! Status: ${response.status}`);
             
-            const messageBubble = document.createElement('div');
-            messageBubble.className = 'msg-bubble';
-            messageBubble.textContent = text;
-            
-            messageWrapper.appendChild(messageBubble);
-            chatBox.appendChild(messageWrapper);
-            chatBox.scrollTop = chatBox.scrollHeight;
+            const data = await response.json();
+            addMessage('bot', data.reply);
+
+        } catch (error) {
+            console.error('Error sending message:', error);
+            addMessage('bot', 'Sorry, I am having trouble connecting. Please try again later.');
+        } finally {
+            chatInput.disabled = false;
+            sendButton.disabled = false;
+            chatInput.focus();
         }
+    };
 
-        function toggleLoading(isLoading) {
-            sendButton.disabled = isLoading;
-            messageInput.disabled = isLoading;
-            uploadButton.disabled = isLoading;
-            sendButton.innerHTML = isLoading ? `<svg class="animate-spin h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>` : 'Send';
+    const startChat = async () => {
+        showLoading();
+        try {
+            const response = await fetch(`${BACKEND_URL}/api/chat/${AGENT_ID}`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ message: 'Hello', session_id: sessionId })
+            });
+            if (!response.ok) throw new Error(`HTTP error! Status: ${response.status}`);
+            const data = await response.json();
+            addMessage('bot', data.reply);
+        } catch (error) {
+            console.error('Error starting chat:', error);
+            addMessage('bot', 'Sorry, I am unable to connect right now.');
         }
-        
-        function checkForUploadRequest(message) {
-            const lowerCaseMessage = message.toLowerCase();
-            let fileTypeDetected = null;
+    };
 
-            // FIX: Reordered the checks to be more specific.
-            // Check for the most specific term ("signature") first to avoid
-            // being incorrectly matched by a less specific term ("passport")
-            // in the same sentence.
-            if (lowerCaseMessage.includes('signature')) {
-                fileTypeDetected = 'signature';
-                fileUploadLabel.textContent = 'Please upload a picture of your signature:';
-            } else if (lowerCaseMessage.includes('passport')) {
-                fileTypeDetected = 'passport';
-                fileUploadLabel.textContent = 'Please upload a clear copy of your passport photograph:';
-            } else if (lowerCaseMessage.includes('nin')) {
-                fileTypeDetected = 'nin';
-                fileUploadLabel.textContent = 'Please upload a clear picture of your NIN:';
-            }
-            
-            if(fileTypeDetected) {
-                currentFileType = fileTypeDetected;
-                fileUploadSection.style.display = 'block';
-            } else {
-                fileUploadSection.style.display = 'none';
-            }
-        }
+    sendButton.addEventListener('click', sendMessage);
+    chatInput.addEventListener('keypress', (e) => {
+        if (e.key === 'Enter') sendMessage();
+    });
 
-        async function sendMessage() {
-            const messageText = messageInput.value.trim();
-            if (!messageText) return;
-
-            addMessage('user', messageText);
-            messageInput.value = '';
-            toggleLoading(true);
-
-            try {
-                const response = await fetch(`/api/chat/${agentId}`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ message: messageText, session_id: sessionId })
-                });
-
-                if (!response.ok) {
-                    throw new Error(`HTTP error! status: ${response.status}`);
-                }
-
-                const data = await response.json();
-                addMessage('bot', data.reply);
-                checkForUploadRequest(data.reply);
-
-            } catch (error) {
-                console.error('Error sending message:', error);
-                addMessage('bot', 'Sorry, something went wrong. Please try again.');
-            } finally {
-                toggleLoading(false);
-            }
-        }
-        
-        async function uploadFile() {
-            if (!fileInput.files[0] || !currentFileType) {
-                uploadStatus.textContent = 'Please select a file first.';
-                uploadStatus.style.color = 'red';
-                return;
-            }
-            
-            const formData = new FormData();
-            formData.append('file', fileInput.files[0]);
-            formData.append('session_id', sessionId);
-            formData.append('file_type', currentFileType);
-            
-            uploadStatus.textContent = 'Uploading...';
-            uploadStatus.style.color = 'black';
-            toggleLoading(true);
-
-            try {
-                const response = await fetch(`/api/upload/${agentId}`, {
-                    method: 'POST',
-                    body: formData
-                });
-                
-                const result = await response.json();
-
-                if (!response.ok) {
-                    throw new Error(result.error || 'Upload failed');
-                }
-                
-                uploadStatus.textContent = 'Upload successful!';
-                uploadStatus.style.color = 'green';
-                fileInput.value = ''; // Reset file input
-                
-                // Trigger the next step from the bot
-                await sendMessageAfterUpload();
-
-            } catch (error) {
-                console.error('Error uploading file:', error);
-                uploadStatus.textContent = `Upload failed: ${error.message}`;
-                uploadStatus.style.color = 'red';
-            } finally {
-                toggleLoading(false);
-            }
-        }
-        
-        // This function sends a generic message to trigger the bot's next step after an upload
-        async function sendMessageAfterUpload() {
-            // Use a more neutral message to avoid confusion
-            const messageText = `File uploaded. What is the next step?`;
-            
-            // We don't need to add the user message to the chat here, 
-            // as it's just a trigger for the bot. The bot's response is what matters.
-            toggleLoading(true);
-
-            try {
-                const response = await fetch(`/api/chat/${agentId}`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ message: messageText, session_id: sessionId })
-                });
-
-                if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
-
-                const data = await response.json();
-                addMessage('bot', data.reply);
-                checkForUploadRequest(data.reply);
-
-            } catch (error) {
-                console.error('Error sending message:', error);
-                addMessage('bot', 'Sorry, something went wrong. Please try again.');
-            } finally {
-                toggleLoading(false);
-            }
-        }
-
-        // Function to correctly start the conversation
-        async function startChat() {
-            toggleLoading(true);
-            // This message is a trigger for the backend to send the first question
-            const startMessage = "Hello, I am ready to begin the registration process.";
-            try {
-                const response = await fetch(`/api/chat/${agentId}`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ message: startMessage, session_id: sessionId })
-                });
-                if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
-                const data = await response.json();
-                addMessage('bot', data.reply);
-                checkForUploadRequest(data.reply);
-            } catch (error) {
-                console.error('Error starting chat:', error);
-                addMessage('bot', 'Sorry, something went wrong. Please refresh the page to start.');
-            } finally {
-                toggleLoading(false);
-            }
-        }
-
-        sendButton.addEventListener('click', sendMessage);
-        messageInput.addEventListener('keypress', (e) => {
-            if (e.key === 'Enter') {
-                e.preventDefault();
-                sendMessage();
-            }
-        });
-        uploadButton.addEventListener('click', uploadFile);
-
-        // Initial greeting from the bot
-        window.onload = () => {
-             startChat();
-        };
-
-    </script>
-</body>
-</html>
+  })();
+</script>
